@@ -47,6 +47,7 @@ SOURCE_INFO = {
     "himalayas": ("Himalayas", "https://himalayas.app"),
     "arbeitnow": ("Arbeitnow", "https://www.arbeitnow.com"),
     "wwr": ("We Work Remotely", "https://weworkremotely.com"),
+    "boards": ("Company career pages", ""),
 }
 
 # Ordered: the first matching category wins (title is checked before source tags).
@@ -283,15 +284,21 @@ def fetch_jobicy():
                          tags=[ind] if ind else [], cat_hint=ind))
     return out
 
-def fetch_himalayas():
+def fetch_himalayas(q="", pages=HIMALAYAS_PAGES, keep=None):
+    """India + worldwide jobs. `q` is Himalayas' own (loose) keyword search; `keep(text)` gets each job's
+    full lowercased text and can drop weak matches."""
     out = []
     for scope in ({"country": "India"}, {"worldwide": "true"}):
-        for page in range(1, HIMALAYAS_PAGES + 1):
-            data = get("https://himalayas.app/jobs/api/search", {"sort": "recent", "page": page, **scope})
+        for page in range(1, pages + 1):
+            data = get("https://himalayas.app/jobs/api/search",
+                       {"sort": "recent", "page": page, **({"q": q} if q else {}), **scope})
             jobs = data.get("jobs", [])
             for j in jobs:
                 loc = ", ".join(j.get("locationRestrictions") or []) or "Worldwide"
                 cats = (j.get("categories") or []) + (j.get("parentCategories") or [])
+                if keep and not keep(f"{j.get('title')} {j.get('companyName')} {' '.join(cats)} "
+                                     f"{text_of(j.get('description') or j.get('excerpt'))}".lower()):
+                    continue
                 out.append(build("himalayas", j.get("title"), j.get("companyName"), loc,
                                  j.get("applicationLink"), "https://himalayas.app",
                                  to_dt(j.get("pubDate")), j.get("description") or j.get("excerpt"),
@@ -301,7 +308,7 @@ def fetch_himalayas():
                                               j.get("salaryPeriod")),
                                  tags=cats[:4], cat_hint=" ".join(cats),
                                  expires=to_dt(j.get("expiryDate"))))
-            if not jobs:
+            if len(jobs) < 20:   # search returns 20 per page; fewer means the last page
                 break
             time.sleep(1.5)
     return out
@@ -333,6 +340,24 @@ FETCHERS = {"remotive": fetch_remotive, "remoteok": fetch_remoteok, "jobicy": fe
 
 # ============================== MAIN ==============================
 
+def finalize(jobs, now, max_age_days=MAX_AGE_DAYS):
+    """Drop old/expired jobs, remove duplicates, add ids and strip internal fields. Newest first."""
+    cutoff = now - timedelta(days=max_age_days)
+    seen, final = set(), []
+    for j in sorted(jobs, key=lambda x: x["_posted_dt"] or cutoff, reverse=True):
+        if j["_posted_dt"] and j["_posted_dt"] < cutoff:
+            continue
+        if j.get("_expires") and j["_expires"] < now:
+            continue
+        key = (re.sub(r"\W+", " ", j["title"].lower()).strip(), re.sub(r"\W+", " ", j["company"].lower()).strip())
+        if key in seen:
+            continue
+        seen.add(key)
+        j = {k: v for k, v in j.items() if k not in ("_posted_dt", "_expires")}
+        j["id"] = re.sub(r"[^a-z0-9]+", "-", f"{j['source']}-{j['company']}-{j['title']}".lower())[:90].strip("-")
+        final.append(j)
+    return final
+
 def load_previous():
     try:
         return json.loads(OUT_FILE.read_text(encoding="utf-8"))
@@ -341,7 +366,6 @@ def load_previous():
 
 def main():
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=MAX_AGE_DAYS)
     previous = load_previous()
     jobs, sources = [], {}
 
@@ -364,20 +388,7 @@ def main():
             print(f"  {name:<18} FAILED ({e}); kept {len(kept)} from last run", file=sys.stderr)
         time.sleep(2)
 
-    seen, final = set(), []
-    for j in sorted(jobs, key=lambda x: x["_posted_dt"] or cutoff, reverse=True):
-        if j["_posted_dt"] and j["_posted_dt"] < cutoff:
-            continue
-        if j.get("_expires") and j["_expires"] < now:
-            continue
-        key = (re.sub(r"\W+", " ", j["title"].lower()).strip(), re.sub(r"\W+", " ", j["company"].lower()).strip())
-        if key in seen:
-            continue
-        seen.add(key)
-        j.pop("_posted_dt", None)
-        j.pop("_expires", None)
-        j["id"] = re.sub(r"[^a-z0-9]+", "-", f"{j['source']}-{j['company']}-{j['title']}".lower())[:90].strip("-")
-        final.append(j)
+    final = finalize(jobs, now)
 
     OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     payload = {"updated": now.strftime("%Y-%m-%dT%H:%MZ"), "count": len(final),

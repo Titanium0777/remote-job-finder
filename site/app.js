@@ -247,8 +247,13 @@
 
   // ---------- live search ----------
   // Asks each source for the keyword (one request per source) so the bar can show real progress.
-  const SOURCE_KEYS = ["himalayas", "remoteok", "jobicy", "remotive"];
-  const SOURCE_NAMES = { himalayas: "Himalayas", remoteok: "Remote OK", jobicy: "Jobicy", remotive: "Remotive" };
+  // The server says which sources it has (/api/sources); this default matches the Netlify version.
+  let SOURCES = [{ key: "himalayas", name: "Himalayas" }, { key: "remoteok", name: "Remote OK" },
+                 { key: "jobicy", name: "Jobicy" }, { key: "remotive", name: "Remotive" }];
+  const sourcesReady = fetch("/api/sources")
+    .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+    .then((list) => { if (Array.isArray(list) && list.length) SOURCES = list; })
+    .catch(() => {});
 
   function progressEl() {
     const pct = Math.round((searching.done / searching.total) * 100);
@@ -274,21 +279,28 @@
     const run = ++searchRun;
     LIVE = null;
     if (!q) { searching = null; render(); return; }
-    searching = { q, total: SOURCE_KEYS.length, done: 0,
-      sources: SOURCE_KEYS.map((k) => ({ name: SOURCE_NAMES[k], status: "wait", count: 0 })) };
+    sourcesReady.then(() => { if (run === searchRun) runSearch(q, run); });
+  }
+
+  function runSearch(q, run) {
+    const keys = SOURCES.map((s) => s.key);
+    const names = {};
+    SOURCES.forEach((s) => { names[s.key] = s.name; });
+    searching = { q, total: keys.length, done: 0,
+      sources: keys.map((k) => ({ name: names[k], status: "wait", count: 0 })) };
     render();
     const jobs = [], failed = [];
     let reachable = 0;
-    const tasks = SOURCE_KEYS.map((k, i) =>
+    const tasks = keys.map((k, i) =>
       fetch("/api/search?source=" + k + "&q=" + encodeURIComponent(q))
         .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
         .then((d) => {
           if (run !== searchRun) return;
           reachable++;
           if (d.ok) { jobs.push(...d.jobs); searching.sources[i].status = "ok"; searching.sources[i].count = d.jobs.length; }
-          else { failed.push(SOURCE_NAMES[k]); searching.sources[i].status = "fail"; }
+          else { failed.push(names[k]); searching.sources[i].status = "fail"; }
         })
-        .catch(() => { if (run === searchRun) { failed.push(SOURCE_NAMES[k]); searching.sources[i].status = "fail"; } })
+        .catch(() => { if (run === searchRun) { failed.push(names[k]); searching.sources[i].status = "fail"; } })
         .then(() => { if (run === searchRun) { searching.done++; render(); } }));
     Promise.all(tasks).then(() => {
       if (run !== searchRun) return;
@@ -369,8 +381,8 @@
       const c = $("credits");
       c.textContent = "Listings from ";
       srcs.forEach((s, i) => {
-        const a = el("a", null, s.name); a.href = s.url; a.target = "_blank"; a.rel = "noopener";
-        c.appendChild(a);
+        if (s.url) { const a = el("a", null, s.name); a.href = s.url; a.target = "_blank"; a.rel = "noopener"; c.appendChild(a); }
+        else c.append(s.name);   // e.g. company career pages have no single website
         c.append(i < srcs.length - 2 ? ", " : i === srcs.length - 2 ? " and " : ".");
       });
     }

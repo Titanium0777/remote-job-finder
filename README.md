@@ -50,14 +50,17 @@ Press **Search** and the page shows a progress bar (one step per source) while `
 
 ## Run it on your computer
 
-Install the Netlify CLI and run the whole site with the function:
-
 ```
-npm install
-npx netlify dev          # open the URL it prints
+./start.sh                 # first run sets up .venv; then open http://localhost:8765
 ```
 
-Opening `site/` with a plain static server (`python -m http.server -d site`) also works, but it has no `/api/jobs`, so it falls back to `site/data/jobs.json`. Fill that file with `pip install -r requirements.txt` then `python fetch_jobs.py` (at most 4 times a day, because of Remotive's limit).
+This runs the same site with a Python server (`local_server.py`) instead of Netlify. It listens only on your computer. Press **Search** and it asks every source live, with the same progress bar. Fetched feeds are saved in `.cache/`, so restarting doesn't fetch Remotive again (4 a day).
+
+On top of the four sources it also reads **company career pages** straight from the public job-board APIs of Greenhouse, Lever and Ashby (about 30 companies, remote and India-friendly roles only). These are official APIs meant for this, not page scraping. Add companies in `companies.json`, using the name in their careers URL (`boards.greenhouse.io/<name>`, `jobs.lever.co/<name>`, `jobs.ashbyhq.com/<name>`). The first search takes about 20 seconds while they load; after that they're cached for 30 minutes.
+
+LinkedIn, Naukri, Indeed and Internshala are not scraped: they forbid it and block automated requests. The page links out to them under the results ("Also search on").
+
+To use a different port: `PORT=9000 ./start.sh`.
 
 ## Sources and their rules (keep these, or you can lose access)
 

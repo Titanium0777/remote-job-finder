@@ -1,0 +1,7 @@
+{
+  "greenhouse": ["gitlab", "stripe", "airbnb", "cloudflare", "datadog", "discord", "figma", "twilio",
+                 "dropbox", "elastic", "mongodb", "reddit", "instacart", "okta", "coinbase", "asana",
+                 "brex", "gusto", "webflow", "vercel"],
+  "lever": ["palantir", "spotify", "mistral"],
+  "ashby": ["notion", "ramp", "linear", "openai", "deel", "supabase"]
+}
