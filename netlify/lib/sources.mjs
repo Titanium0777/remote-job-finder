@@ -238,14 +238,20 @@ async function fetchJobicy() {
   });
 }
 
-async function fetchHimalayas() {
+/**
+ * Himalayas jobs for India and worldwide. `q` (optional) is a keyword search done by Himalayas itself; its
+ * matching is loose, so `keep(text)` (optional) gets each job's full text, lowercased, and can drop weak matches.
+ */
+async function fetchHimalayas(q = "", pages = HIMALAYAS_PAGES, keep = null) {
   const scopeJobs = async (scope) => {
     const out = [];
-    for (let page = 1; page <= HIMALAYAS_PAGES; page++) {
-      const data = await getJson("https://himalayas.app/jobs/api/search", { sort: "recent", page, ...scope });
+    for (let page = 1; page <= pages; page++) {
+      const data = await getJson("https://himalayas.app/jobs/api/search",
+        { sort: "recent", page, ...(q ? { q } : {}), ...scope });
       const jobs = data.jobs || [];
       for (const j of jobs) {
         const cats = [...(j.categories || []), ...(j.parentCategories || [])];
+        if (keep && !keep(`${j.title} ${j.companyName} ${cats.join(" ")} ${textOf(j.description || j.excerpt)}`.toLowerCase())) continue;
         out.push(build("himalayas", {
           title: j.title, company: j.companyName,
           location: (j.locationRestrictions || []).join(", ") || "Worldwide",
@@ -256,7 +262,7 @@ async function fetchHimalayas() {
           tags: cats.slice(0, 4), catHint: cats.join(" "), expires: toDate(j.expiryDate),
         }));
       }
-      if (!jobs.length) break;
+      if (jobs.length < 20) break;   // Himalayas search returns 20 per page; fewer means the last page
     }
     return out;
   };
@@ -264,7 +270,9 @@ async function fetchHimalayas() {
   return [...india, ...worldwide];
 }
 
-export const FETCHERS = { remotive: fetchRemotive, remoteok: fetchRemoteOk, jobicy: fetchJobicy, himalayas: fetchHimalayas };
+export const searchHimalayas = (q, keep) => fetchHimalayas(q, 2, keep);
+
+export const FETCHERS = { remotive: fetchRemotive, remoteok: fetchRemoteOk, jobicy: fetchJobicy, himalayas: () => fetchHimalayas() };
 
 // ============================== MERGE ==============================
 

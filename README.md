@@ -33,6 +33,14 @@ If a source fails, the last good copy is served and that source is retried after
 
 This is why searches do not call the sources directly: Remotive and Jobicy would block a site that called them on every search.
 
+## Searching
+
+Press **Search** and the page shows a progress bar (one step per source) while `/api/search` asks each source for your keyword, then lists the merged results.
+
+- **Himalayas** is searched live for your keyword. Each keyword is cached for 15 minutes.
+- **Remotive, Remote OK and Jobicy** only publish a full feed and limit how often it can be fetched, so their cached feeds (see the table above) are searched instead of calling them on every search.
+- Typing without pressing Search filters the already-loaded listings instantly.
+
 ## Put it online (one-time setup)
 
 1. **Push this folder to a GitHub repository.**

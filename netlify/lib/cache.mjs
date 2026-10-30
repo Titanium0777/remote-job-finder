@@ -7,29 +7,35 @@ import { FETCHERS, SOURCE_INFO, mergeJobs } from "./sources.mjs";
 
 const MIN_RETRY_MS = 5 * 60e3;
 
-/** `store` needs get(key, {type:"json"}) and setJSON(key, value), like a Netlify Blobs store. */
+/**
+ * Returns {rec, error} for one source: the cached copy if it is still fresh, otherwise a live fetch
+ * (saved back to the cache). `store` needs get(key, {type:"json"}) and setJSON(key, value), like a
+ * Netlify Blobs store.
+ */
+export async function getSourceRecord(store, key, now = Date.now()) {
+  const info = SOURCE_INFO[key];
+  let rec = null;
+  try { rec = await store.get(key, { type: "json" }); } catch { /* treat as empty cache */ }
+
+  const fresh = rec && now - rec.fetchedAt < info.ttlMs;
+  // After a failed attempt, wait before trying the source again so we never hammer it.
+  const retryMs = Math.max(MIN_RETRY_MS, info.ttlMs / 2);
+  const coolingDown = rec && rec.attemptedAt && now - rec.attemptedAt < retryMs;
+  if (fresh || coolingDown) return { key, rec, error: rec?.error };
+
+  try {
+    const jobs = (await FETCHERS[key]()).filter(Boolean);
+    if (!jobs.length) throw new Error("no jobs returned");
+    rec = { fetchedAt: now, attemptedAt: now, jobs };
+  } catch (e) {
+    rec = { fetchedAt: rec?.fetchedAt ?? 0, attemptedAt: now, jobs: rec?.jobs ?? [], error: String(e.message || e).slice(0, 120) };
+  }
+  try { await store.setJSON(key, rec); } catch { /* cache write failed; still serve the data */ }
+  return { key, rec, error: rec.error };
+}
+
 export async function loadJobs(store, now = Date.now()) {
-  const results = await Promise.all(Object.keys(FETCHERS).map(async (key) => {
-    const info = SOURCE_INFO[key];
-    let rec = null;
-    try { rec = await store.get(key, { type: "json" }); } catch { /* treat as empty cache */ }
-
-    const fresh = rec && now - rec.fetchedAt < info.ttlMs;
-    // After a failed attempt, wait before trying the source again so we never hammer it.
-    const retryMs = Math.max(MIN_RETRY_MS, info.ttlMs / 2);
-    const coolingDown = rec && rec.attemptedAt && now - rec.attemptedAt < retryMs;
-    if (fresh || coolingDown) return { key, rec, error: rec?.error };
-
-    try {
-      const jobs = (await FETCHERS[key]()).filter(Boolean);
-      if (!jobs.length) throw new Error("no jobs returned");
-      rec = { fetchedAt: now, attemptedAt: now, jobs };
-    } catch (e) {
-      rec = { fetchedAt: rec?.fetchedAt ?? 0, attemptedAt: now, jobs: rec?.jobs ?? [], error: String(e.message || e).slice(0, 120) };
-    }
-    try { await store.setJSON(key, rec); } catch { /* cache write failed; still serve the data */ }
-    return { key, rec, error: rec.error };
-  }));
+  const results = await Promise.all(Object.keys(FETCHERS).map((key) => getSourceRecord(store, key, now)));
 
   const sources = {};
   results.forEach(({ key, rec, error }) => {

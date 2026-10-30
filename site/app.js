@@ -16,6 +16,9 @@
   };
 
   let JOBS = [], META = {}, shown = PAGE;
+  let LIVE = null;        // {q, jobs, failed, at} once a live search has finished
+  let searching = null;   // {q, total, done, sources:[{name, status, count}]} while one is running
+  let searchRun = 0;      // bumped on every search so a slow, older one can't overwrite a newer one
   let saved = store.get("rjf_saved", {});      // id -> job snapshot (kept even after the job leaves the feed)
   let applied = store.get("rjf_applied", {});  // id -> {job, at}
   const lastVisit = store.get("rjf_last_visit", null);
@@ -80,17 +83,20 @@
   }
   function results() {
     const rx = terms(state.q);
+    // After a live search the sources have already matched the words, so don't re-filter with our stricter rules.
+    const useLive = !!LIVE && LIVE.q === state.q.trim() && state.tab === "all";
+    const base = useLive ? LIVE.jobs : JOBS;
     let pool;
     if (state.tab === "saved") pool = Object.values(saved);
     else if (state.tab === "applied") pool = Object.values(applied).map((x) => x.job);
-    else pool = JOBS;
-    const match = (j) => rx.every((r) => r.test(j._hay));
+    else pool = base;
+    const match = (j) => useLive || rx.every((r) => r.test(j._hay));
     const list = pool.filter((j) => match(j) && (state.tab !== "all" || passes(j)));
     if (state.sort === "best" && rx.length) list.sort((a, b) => score(b, rx) - score(a, rx));
     else list.sort((a, b) => (b.posted || "").localeCompare(a.posted || ""));
     // category counts for the chips (all filters except category)
     const counts = {};
-    if (state.tab === "all") JOBS.forEach((j) => { if (match(j) && passes(j, true)) counts[j.category] = (counts[j.category] || 0) + 1; });
+    if (state.tab === "all") base.forEach((j) => { if (match(j) && passes(j, true)) counts[j.category] = (counts[j.category] || 0) + 1; });
     return { list, counts };
   }
 
@@ -180,7 +186,10 @@
     meta.innerHTML = "";
     const left = el("div");
     left.appendChild(el("b", null, list.length.toLocaleString() + (list.length === 1 ? " job" : " jobs")));
-    if (state.tab === "all" && META.updated) left.append(" · updated " + ago(META.updated));
+    if (state.tab === "all" && LIVE && LIVE.q === state.q.trim()) {
+      left.append(" · searched live " + ago(new Date(LIVE.at).toISOString()));
+      if (LIVE.failed.length) left.append(" · couldn't reach " + LIVE.failed.join(", "));
+    } else if (state.tab === "all" && META.updated) left.append(" · updated " + ago(META.updated));
     meta.appendChild(left);
     if (state.tab === "applied" && list.length) {
       const ex = el("button", "export", "Download as CSV");
@@ -190,6 +199,14 @@
 
     const box = $("list");
     box.innerHTML = "";
+    if (searching && state.tab === "all") {
+      $("meta").innerHTML = "";
+      $("cats").hidden = true;
+      box.appendChild(progressEl());
+      $("more").hidden = true;
+      $("also").innerHTML = "";
+      return;
+    }
     if (!list.length) {
       const msg = state.tab === "all" && !JOBS.length ? "Jobs are being collected for the first time. Please check back in a few minutes."
         : state.tab === "saved" ? "No saved jobs yet. Tap ☆ Save on any job to keep it here."
@@ -228,6 +245,73 @@
     document.body.appendChild(a); a.click(); a.remove();
   }
 
+  // ---------- live search ----------
+  // Asks each source for the keyword (one request per source) so the bar can show real progress.
+  const SOURCE_KEYS = ["himalayas", "remoteok", "jobicy", "remotive"];
+  const SOURCE_NAMES = { himalayas: "Himalayas", remoteok: "Remote OK", jobicy: "Jobicy", remotive: "Remotive" };
+
+  function progressEl() {
+    const pct = Math.round((searching.done / searching.total) * 100);
+    const box = el("div", "progress");
+    box.setAttribute("role", "status");
+    box.appendChild(el("p", "progress-title", "Searching for “" + searching.q + "”… " + pct + "%"));
+    const bar = el("div", "bar");
+    bar.setAttribute("role", "progressbar");
+    bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", "100"); bar.setAttribute("aria-valuenow", String(pct));
+    const fill = el("span"); fill.style.width = pct + "%";
+    bar.appendChild(fill);
+    box.appendChild(bar);
+    const ul = el("ul", "progress-list");
+    searching.sources.forEach((s) => {
+      const text = s.status === "wait" ? "searching…" : s.status === "ok" ? s.count + (s.count === 1 ? " job" : " jobs") : "unavailable";
+      ul.appendChild(el("li", s.status, (s.status === "ok" ? "✓ " : s.status === "fail" ? "✗ " : "• ") + s.name + " — " + text));
+    });
+    box.appendChild(ul);
+    return box;
+  }
+
+  function liveSearch(q) {
+    const run = ++searchRun;
+    LIVE = null;
+    if (!q) { searching = null; render(); return; }
+    searching = { q, total: SOURCE_KEYS.length, done: 0,
+      sources: SOURCE_KEYS.map((k) => ({ name: SOURCE_NAMES[k], status: "wait", count: 0 })) };
+    render();
+    const jobs = [], failed = [];
+    let reachable = 0;
+    const tasks = SOURCE_KEYS.map((k, i) =>
+      fetch("/api/search?source=" + k + "&q=" + encodeURIComponent(q))
+        .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .then((d) => {
+          if (run !== searchRun) return;
+          reachable++;
+          if (d.ok) { jobs.push(...d.jobs); searching.sources[i].status = "ok"; searching.sources[i].count = d.jobs.length; }
+          else { failed.push(SOURCE_NAMES[k]); searching.sources[i].status = "fail"; }
+        })
+        .catch(() => { if (run === searchRun) { failed.push(SOURCE_NAMES[k]); searching.sources[i].status = "fail"; } })
+        .then(() => { if (run === searchRun) { searching.done++; render(); } }));
+    Promise.all(tasks).then(() => {
+      if (run !== searchRun) return;
+      searching = null;
+      if (!reachable) {
+        // No /api/search (e.g. running the site without Netlify): fall back to searching the loaded listings.
+        render();
+        return;
+      }
+      // The same job can come from two sources; keep the first copy.
+      const seen = new Set();
+      const merged = jobs.filter((j) => {
+        const key = (j.title + "|" + j.company).toLowerCase().replace(/\W+/g, " ").trim();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).map(prep);
+      LIVE = { q, jobs: merged, failed, at: Date.now() };
+      shown = PAGE;
+      render();
+    });
+  }
+
   // ---------- wiring ----------
   const FIELDS = ["elig", "type", "level", "days", "sort"];
   function syncInputs() {
@@ -243,7 +327,13 @@
 
   let timer;
   $("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => { state.q = $("q").value; update(true); }, 250); });
-  $("search-form").addEventListener("submit", (e) => { e.preventDefault(); state.q = $("q").value; update(true); });
+  $("search-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    state.q = $("q").value;
+    state.tab = "all";
+    update(true);
+    liveSearch(state.q.trim());
+  });
   FIELDS.forEach((f) => $(f).addEventListener("change", () => { state[f] = $(f).value; update(true); }));
   $("salary").addEventListener("change", () => { state.salary = $("salary").checked ? "1" : ""; update(true); });
   $("reset").addEventListener("click", () => { Object.assign(state, DEFAULTS, { tab: state.tab }); syncInputs(); update(true); });
@@ -287,6 +377,9 @@
     if (first) store.set("rjf_last_visit", Date.now());
     render();
   }
+
+  // A shared link with ?q= starts its live search straight away instead of waiting for the browse list.
+  if (state.q.trim() && state.tab === "all") liveSearch(state.q.trim());
 
   loadData()
     .then((data) => {
