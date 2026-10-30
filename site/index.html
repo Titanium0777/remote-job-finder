@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remote Job Finder – Remote jobs &amp; internships open to India</title>
+<meta name="description" content="Search fresh remote jobs and internships you can apply to from India, in every field. Updated every 6 hours from Remotive, Remote OK, Jobicy and Himalayas.">
+<meta property="og:title" content="Remote Job Finder – Remote jobs & internships open to India">
+<meta property="og:description" content="Fresh remote jobs and internships in every field, filtered for people based in India. Updated every 6 hours.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#1f5eff">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231f5eff'/%3E%3Ccircle cx='28' cy='28' r='13' fill='none' stroke='white' stroke-width='6'/%3E%3Cpath d='M38 38l12 12' stroke='white' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-in">
+    <a class="logo" href="./">Remote Job Finder</a>
+    <nav class="tabs" aria-label="Views">
+      <button class="tab" data-tab="all">Jobs</button>
+      <button class="tab" data-tab="saved">Saved <span id="n-saved" class="pill">0</span></button>
+      <button class="tab" data-tab="applied">Applied <span id="n-applied" class="pill">0</span></button>
+      <a class="tab" href="about.html">About</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <h1>Remote jobs &amp; internships you can apply to from India</h1>
+    <p class="lede">Every field, fresh listings, updated every 6 hours. Search, filter, save and track what you've applied to.</p>
+    <form class="search" id="search-form" role="search">
+      <input id="q" type="search" placeholder="Try: seo intern, react developer, &quot;customer support&quot;" autocomplete="off" aria-label="Search jobs">
+      <button type="submit">Search</button>
+    </form>
+    <div class="cats" id="cats" aria-label="Categories"></div>
+  </section>
+
+  <section class="filters" aria-label="Filters">
+    <label>Who can apply
+      <select id="elig">
+        <option value="india">Open to India</option>
+        <option value="india_only">India-based roles</option>
+        <option value="worldwide">Worldwide only</option>
+        <option value="any">All locations</option>
+      </select>
+    </label>
+    <label>Job type
+      <select id="type">
+        <option value="">Any type</option>
+        <option value="full-time">Full-time</option>
+        <option value="part-time">Part-time</option>
+        <option value="contract">Contract</option>
+        <option value="internship">Internship</option>
+        <option value="freelance">Freelance</option>
+      </select>
+    </label>
+    <label>Level
+      <select id="level">
+        <option value="">Any level</option>
+        <option value="entry">Intern &amp; entry</option>
+        <option value="mid">Mid level</option>
+        <option value="senior">Senior</option>
+      </select>
+    </label>
+    <label>Posted
+      <select id="days">
+        <option value="">Any time</option>
+        <option value="1">Last 24 hours</option>
+        <option value="3">Last 3 days</option>
+        <option value="7">Last 7 days</option>
+        <option value="14">Last 14 days</option>
+        <option value="30">Last 30 days</option>
+      </select>
+    </label>
+    <label>Sort
+      <select id="sort">
+        <option value="newest">Newest first</option>
+        <option value="best">Best match</option>
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" id="salary"> Salary shown</label>
+    <button type="button" class="reset" id="reset">Reset</button>
+  </section>
+
+  <section aria-live="polite">
+    <div class="meta" id="meta"></div>
+    <div id="list"></div>
+    <div class="more-wrap"><button type="button" id="more" class="more" hidden>Show more</button></div>
+    <p class="also" id="also"></p>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p><strong>Never pay to apply for a job.</strong> Real employers don't ask for fees. Apply buttons open the original posting on the source site.</p>
+    <p id="credits">Listings from Remotive, Remote OK, Jobicy and Himalayas.</p>
+    <p><a href="about.html">About, sources &amp; privacy</a></p>
+  </div>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>
