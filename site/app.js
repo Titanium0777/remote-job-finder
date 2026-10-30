@@ -1,8 +1,9 @@
-/* Remote Job Finder - front end. Loads data/jobs.json and does all searching in the browser. */
+/* Remote Job Finder - front end. Loads live listings from /api/jobs and does all searching in the browser. */
 (function () {
   "use strict";
 
   const PAGE = 30;
+  const REFRESH_MS = 5 * 60 * 1000;   // re-check for new listings while the page is open
   const DEFAULTS = { q: "", cat: "", type: "", elig: "india", level: "", days: "", salary: "", sort: "newest", tab: "all" };
   const TYPE_LABEL = { "full-time": "Full-time", "part-time": "Part-time", contract: "Contract", internship: "Internship", freelance: "Freelance" };
   const LEVEL_LABEL = { intern: "Intern", entry: "Entry level", mid: "Mid level", senior: "Senior" };
@@ -255,31 +256,46 @@
   readUrl();
   syncInputs();
   $("list").appendChild(el("p", "empty", "Loading jobs…"));
-  fetch("data/jobs.json", { cache: "no-cache" })
-    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-    .then((data) => {
-      META = data;
-      JOBS = data.jobs.map((j) => Object.assign(j, {
-        _title: j.title.toLowerCase(),
-        _hay: [j.title, j.company, j.location, (j.tags || []).join(" "), j.snippet].join(" ").toLowerCase(),
-      }));
-      // saved/applied snapshots need search fields too
-      Object.values(saved).concat(Object.values(applied).map((x) => x.job)).forEach((j) => {
-        j._title = (j.title || "").toLowerCase();
-        j._hay = [j.title, j.company, j.location, (j.tags || []).join(" "), j.snippet].join(" ").toLowerCase();
+  // Live listings come from the /api/jobs Netlify Function; data/jobs.json is only a fallback
+  // for running the site locally without Netlify.
+  const loadData = () =>
+    fetch("/api/jobs", { cache: "no-cache" })
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .catch(() => fetch("data/jobs.json", { cache: "no-cache" })
+        .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }));
+
+  const prep = (j) => Object.assign(j, {
+    _title: (j.title || "").toLowerCase(),
+    _hay: [j.title, j.company, j.location, (j.tags || []).join(" "), j.snippet].join(" ").toLowerCase(),
+  });
+
+  function apply(data, first) {
+    META = data;
+    JOBS = data.jobs.map(prep);
+    // saved/applied snapshots need search fields too
+    Object.values(saved).concat(Object.values(applied).map((x) => x.job)).forEach(prep);
+    const srcs = Object.values(data.sources || {});
+    if (srcs.length) {
+      const c = $("credits");
+      c.textContent = "Listings from ";
+      srcs.forEach((s, i) => {
+        const a = el("a", null, s.name); a.href = s.url; a.target = "_blank"; a.rel = "noopener";
+        c.appendChild(a);
+        c.append(i < srcs.length - 2 ? ", " : i === srcs.length - 2 ? " and " : ".");
       });
-      const srcs = Object.values(data.sources || {});
-      if (srcs.length) {
-        const c = $("credits");
-        c.textContent = "Listings from ";
-        srcs.forEach((s, i) => {
-          const a = el("a", null, s.name); a.href = s.url; a.target = "_blank"; a.rel = "noopener";
-          c.appendChild(a);
-          c.append(i < srcs.length - 2 ? ", " : i === srcs.length - 2 ? " and " : ".");
-        });
-      }
-      store.set("rjf_last_visit", Date.now());
-      render();
+    }
+    if (first) store.set("rjf_last_visit", Date.now());
+    render();
+  }
+
+  loadData()
+    .then((data) => {
+      apply(data, true);
+      // Pick up new listings while the page stays open.
+      setInterval(() => {
+        if (document.hidden) return;
+        loadData().then((d) => apply(d, false)).catch(() => {});
+      }, REFRESH_MS);
     })
     .catch((err) => {
       $("list").innerHTML = "";

@@ -1,7 +1,7 @@
 # Remote Job Finder
 
 A free, fast job site: remote jobs and internships in every field, filtered for people based in India.
-Listings refresh automatically every 6 hours. No server, no database, and no cost on the free tiers of GitHub and Netlify.
+Listings are fetched live from the job sources by a Netlify Function, so there is no stored job file to go stale. No server to run, and no cost on Netlify's free tier.
 
 **Features**
 - Search with live results. Words must all match; put "quoted phrases" in quotes.
@@ -16,31 +16,40 @@ Listings refresh automatically every 6 hours. No server, no database, and no cos
 ## How it works
 
 ```
-GitHub Action (every 6 h) ──> fetch_jobs.py ──> site/data/jobs.json ──> commit ──> Netlify redeploys
-                                                         │
-                         visitor's browser loads it and searches it locally (site/app.js)
+visitor's browser ──> /api/jobs (Netlify Function) ──> per-source cache (Netlify Blobs) ──> live source APIs
+        │                                                  only re-fetches when a source's limit allows
+        └─ search, filters and sorting run locally in the browser on the returned listings
 ```
+
+The function (`netlify/functions/jobs.mjs`) fetches Remotive, Remote OK, Jobicy and Himalayas, normalises them, removes duplicates and returns one JSON list. Each source has its own cache time in `netlify/lib/sources.mjs` (`ttlMs`), chosen to stay inside that source's rules:
+
+| Source | Re-fetched at most every |
+|---|---|
+| Remotive | 6 hours (their limit is 4 fetches a day) |
+| Jobicy | 1 hour (their limit is one sync an hour) |
+| Remote OK, Himalayas | 15 minutes |
+
+If a source fails, the last good copy is served and that source is retried after a cool-down. The browser re-checks every 5 minutes while the page is open.
+
+This is why searches do not call the sources directly: Remotive and Jobicy would block a site that called them on every search.
 
 ## Put it online (one-time setup)
 
-1. **Create a GitHub repository** and push this folder to it.
-2. **Run the first data update.** In the repo, open **Actions → Update jobs → Run workflow**. After about a minute, `site/data/jobs.json` fills with jobs.
-   - If the commit step fails with a permission error, go to **Settings → Actions → General → Workflow permissions**, choose **Read and write permissions**, then run it again.
-3. **Deploy on Netlify.** Choose **Add new site → Import an existing project → GitHub**, then pick the repo. Netlify reads `netlify.toml` automatically (publish folder: `site`, no build command). Click **Deploy**.
-4. **Add your domain (optional).** In Netlify, go to **Domain management → Add a domain**, then update your DNS as Netlify shows.
-5. **Done.** Every 6 hours the Action commits fresh data and Netlify redeploys on its own.
-
-Check Netlify's current free-plan limits for deploys. Four small deploys a day is light. The `site` folder also works on Cloudflare Pages or GitHub Pages if you prefer.
+1. **Push this folder to a GitHub repository.**
+2. **Deploy on Netlify.** Choose **Add new site → Import an existing project → GitHub**, then pick the repo. Netlify reads `netlify.toml` (publish folder `site`, functions in `netlify/functions`) and installs the dependency in `package.json`. Click **Deploy**.
+3. **Add your domain (optional).** In Netlify, go to **Domain management → Add a domain**.
+4. **Done.** Open the site; the first visit after a cache expires takes a few seconds while the sources are fetched.
 
 ## Run it on your computer
 
+Install the Netlify CLI and run the whole site with the function:
+
 ```
-pip install -r requirements.txt
-python fetch_jobs.py                  # downloads jobs into site/data/jobs.json
-python -m http.server 8000 -d site    # open http://localhost:8000
+npm install
+npx netlify dev          # open the URL it prints
 ```
 
-Don't run `fetch_jobs.py` more than about 4 times a day. Remotive allows at most 4 fetches a day, and the GitHub Action already uses those.
+Opening `site/` with a plain static server (`python -m http.server -d site`) also works, but it has no `/api/jobs`, so it falls back to `site/data/jobs.json`. Fill that file with `pip install -r requirements.txt` then `python fetch_jobs.py` (at most 4 times a day, because of Remotive's limit).
 
 ## Sources and their rules (keep these, or you can lose access)
 
@@ -53,15 +62,15 @@ Don't run `fetch_jobs.py` more than about 4 times a day. Remotive allows at most
 | Arbeitnow | **Off** | No published terms. Email them before turning it on. |
 | We Work Remotely | **Off** | Confirm that their terms allow republishing their RSS before turning it on. |
 
-To switch a source on or off, edit `ENABLED` at the top of `fetch_jobs.py`.
+To switch a source on or off, edit `FETCHERS` at the bottom of `netlify/lib/sources.mjs` (and `ENABLED` in `fetch_jobs.py` for the local fallback).
 
 **Never add JobPosting structured data (schema) to this site.** Remotive and Himalayas forbid passing their jobs to Google Jobs. If you plan to make money from the site (ads or paid features), ask the sources first. Remotive and Arbeitnow sell paid access for commercial use.
 
 ## Customise
 
 - **Site name and text:** `site/index.html` and `site/about.html`.
-- **Categories:** `CATEGORY_RULES` in `fetch_jobs.py`. The first match wins.
-- **How long jobs stay listed:** `MAX_AGE_DAYS` in `fetch_jobs.py` (default 45).
+- **Categories:** `CATEGORY_RULES` in `netlify/lib/sources.mjs` (and `fetch_jobs.py`). The first match wins.
+- **How long jobs stay listed:** `MAX_AGE_DAYS` in `netlify/lib/sources.mjs` (and `fetch_jobs.py`) (default 45).
 - **Colours:** the variables at the top of `site/style.css`.
 
 Built with AI-assisted development (Claude Code).
